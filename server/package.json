@@ -1,0 +1,41 @@
+{
+    "name": "server",
+    "private": true,
+    "version": "1.0.0",
+    "type": "module",
+    "main": "dist/index.js",
+    "scripts": {
+        "dev": "tsx watch src/index.ts",
+        "build": "tsc -p tsconfig.json",
+        "start": "node dist/index.js",
+        "test": "vitest run",
+        "token": "tsx scripts/generate-token.ts",
+        "check:db": "tsx scripts/check-db.ts",
+        "test:watch": "vitest",
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "inspect": "tsx scripts/inspect-mrp.ts",
+        "audit": "tsx scripts/audit-approval-columns.ts",
+        "audit:when": "tsx scripts/audit-when.ts",
+        "audit:waiting": "tsx scripts/audit-waiting.ts"
+    },
+    "dependencies": {
+        "cors": "^2.8.5",
+        "dotenv": "^16.4.7",
+        "express": "^4.21.2",
+        "express-rate-limit": "^7.5.0",
+        "helmet": "^8.0.0",
+        "mssql": "^12.7.7",
+        "zod": "^3.24.1"
+    },
+    "devDependencies": {
+        "@types/cors": "^2.8.17",
+        "@types/express": "^4.17.21",
+        "@types/mssql": "^12.3.0",
+        "@types/node": "^22.10.5",
+        "@types/supertest": "^7.2.1",
+        "supertest": "^7.3.1",
+        "tsx": "^4.19.2",
+        "typescript": "^5.7.3",
+        "vitest": "^2.1.8"
+    }
+}
