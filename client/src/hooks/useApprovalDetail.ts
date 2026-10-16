@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { ApiBusinessError, fetchApprovalDetail } from '../api/mrpApproval';
+import { ApiBusinessError, fetchApprovalDetail, type ApprovalRef } from '../api/mrpApproval';
 import type { ApiFail, MrpDetail } from '../types/approval';
 
 interface DetailResult {
@@ -7,10 +7,10 @@ interface DetailResult {
   fail: ApiFail | null;
 }
 
-export function useApprovalDetail(token: string | null) {
+export function useApprovalDetail(ref: ApprovalRef) {
   return useQuery<DetailResult, Error>({
-    queryKey: ['mrpApproval', 'detail', token],
-    enabled: Boolean(token),
+    queryKey: ['mrpApproval', 'detail', ref.token ?? ref.m ?? ''],
+    enabled: Boolean(ref.token || ref.m),
     retry: (failureCount, error) => {
       // Kegagalan bisnis (token expired/invalid) tidak akan berubah kalau diulang.
       if (error instanceof ApiBusinessError) return false;
@@ -18,7 +18,7 @@ export function useApprovalDetail(token: string | null) {
     },
     queryFn: async (): Promise<DetailResult> => {
       try {
-        return { detail: await fetchApprovalDetail(token as string), fail: null };
+        return { detail: await fetchApprovalDetail(ref), fail: null };
       } catch (error) {
         if (error instanceof ApiBusinessError) {
           return {

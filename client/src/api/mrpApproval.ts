@@ -15,9 +15,23 @@ export class ApiBusinessError extends Error {
   }
 }
 
-export async function fetchApprovalDetail(token: string): Promise<MrpDetail> {
+/**
+ * Cara untuk sampai ke sebuah MRP.
+ * - `token`: cara resmi, hasil createLink dari backend CI (signed, 72 jam).
+ * - `m`: SEMENTARA (QA), nomor MRP terenkripsi AES-256-GCM oleh backend CI.
+ */
+export interface ApprovalRef {
+  token?: string | null;
+  m?: string | null;
+}
+
+function refParams(ref: ApprovalRef): Record<string, string> {
+  return ref.token ? { token: ref.token } : { m: ref.m ?? '' };
+}
+
+export async function fetchApprovalDetail(ref: ApprovalRef): Promise<MrpDetail> {
   const response = await http.get<ApiResponse<MrpDetail>>('/mrpApproval/detail', {
-    params: { token },
+    params: refParams(ref),
   });
 
   if (!response.data.success) {
@@ -27,12 +41,12 @@ export async function fetchApprovalDetail(token: string): Promise<MrpDetail> {
 }
 
 export async function submitApproval(
-  token: string,
+  ref: ApprovalRef,
   decision: 'approve' | 'reject',
   note?: string,
 ): Promise<SubmitApiResponse> {
   const response = await http.post<SubmitApiResponse>('/mrpApproval/submit', {
-    token,
+    ...refParams(ref),
     decision,
     ...(note ? { note } : {}),
   });

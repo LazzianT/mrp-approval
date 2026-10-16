@@ -4,7 +4,6 @@ import request from 'supertest';
 import type { Executor, Queryable } from '../src/db/pool.js';
 import { MRP_HEADER_COLUMNS } from '../src/config/mrpColumns.js';
 import { STAGES, type StageCode } from '../src/config/stages.js';
-
 const SECRET = 'secret-uji-routes-minimal-32-karakter-panjang';
 const API_KEY = 'api-key-uji-123456';
 const M = 'MRP/2026/10/001';
@@ -135,6 +134,40 @@ describe('GET /api/mrpApproval/detail', () => {
   it('tanpa token -> 400 dengan pesan jelas', async () => {
     const res = await request(app).get('/api/mrpApproval/detail');
     expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('ALLOW_UNSIGNED_LINK mati -> payload tetap ditolak', async () => {
+    const res = await request(app).get('/api/mrpApproval/detail').query({ m: 'apa-saja' });
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('ALLOW_UNSIGNED_LINK hidup -> payload terenkripsi bisa membuka detail', async () => {
+    // Import dinamis: env.ts harus dibaca SETELAH process.env di atas disetel.
+    const { env } = await import('../src/config/env.js');
+    const { encryptMrpNo } = await import('../src/services/crypto.js');
+    env.ALLOW_UNSIGNED_LINK = true;
+    db.approvedStages = [];
+    const res = await request(app)
+      .get('/api/mrpApproval/detail')
+      .query({ m: encryptMrpNo('MRP/2026/10/001') });
+    env.ALLOW_UNSIGNED_LINK = false;
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.mrpNo).toBe('MRP/2026/10/001');
+    expect(res.body.data.tahap).toBe('SH');
+  });
+
+  it('payload rusak atau disamarkan -> ditolak', async () => {
+    const { env } = await import('../src/config/env.js');
+    const { encryptMrpNo } = await import('../src/services/crypto.js');
+    env.ALLOW_UNSIGNED_LINK = true;
+    const sah = encryptMrpNo('MRP/2026/10/001');
+    const rusak = `${sah.slice(0, -4)}AAAA`;
+    const res = await request(app).get('/api/mrpApproval/detail').query({ m: rusak });
+    env.ALLOW_UNSIGNED_LINK = false;
+
     expect(res.body.success).toBe(false);
   });
 

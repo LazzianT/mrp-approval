@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { submitApproval } from '../api/mrpApproval';
+import { submitApproval, type ApprovalRef } from '../api/mrpApproval';
 import type { ApiFail, SubmitResponse } from '../types/approval';
 
 export const MIN_REJECT_NOTE_LENGTH = 5;
@@ -14,7 +14,7 @@ export type SubmitState =
  * Kunci submit ganda ditangani di hook ini juga, bukan hanya dengan disable tombol:
  * pengaman kedua kalau ada pemicu lain (mis. tombol enter cepat).
  */
-export function useApprovalSubmit(token: string | null) {
+export function useApprovalSubmit(ref: ApprovalRef) {
   const [state, setState] = useState<SubmitState>({ status: 'idle' });
   const [note, setNote] = useState('');
   const [noteError, setNoteError] = useState<string | null>(null);
@@ -29,11 +29,11 @@ export function useApprovalSubmit(token: string | null) {
   }
 
   async function approve(): Promise<void> {
-    if (!token || isSubmitting) return;
+    if ((!ref.token && !ref.m) || isSubmitting) return;
     setState({ status: 'submitting' });
 
     try {
-      const response = await submitApproval(token, 'approve');
+      const response = await submitApproval(ref, 'approve');
       if (response.success) {
         setState({ status: 'success', result: response });
         return;
@@ -53,7 +53,7 @@ export function useApprovalSubmit(token: string | null) {
   }
 
   async function reject(): Promise<boolean> {
-    if (!token || isSubmitting) return false;
+    if ((!ref.token && !ref.m) || isSubmitting) return false;
 
     const trimmed = note.trim();
     if (trimmed.length < MIN_REJECT_NOTE_LENGTH) {
@@ -65,7 +65,7 @@ export function useApprovalSubmit(token: string | null) {
     setState({ status: 'submitting' });
 
     try {
-      const response = await submitApproval(token, 'reject', trimmed);
+      const response = await submitApproval(ref, 'reject', trimmed);
       if (response.success) {
         setState({ status: 'success', result: response });
         return true;

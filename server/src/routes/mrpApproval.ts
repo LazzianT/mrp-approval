@@ -3,7 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { BLOCKING_STAGES, DEFAULT_STAGE, isStageCode, type StageCode } from '../config/stages.js';
 import { env } from '../config/env.js';
-import { stageLabelOf } from '../db/queries/mrp.js';
+import { nextPendingStage, selectMrpHeader, stageLabelOf } from '../db/queries/mrp.js';
 import type { Executor } from '../db/pool.js';
 import { requireApiKey } from '../middleware/apiKey.js';
 import { HttpError, asyncHandler } from '../middleware/errorHandler.js';
@@ -13,6 +13,7 @@ import {
   submitDecision,
 } from '../services/approval.js';
 import { buildDummyDetail } from '../services/dummyDetail.js';
+import { decryptMrpNo } from '../services/crypto.js';
 import { TokenError, TOKEN_TTL_MS, base64urlDecode, generateToken, tokenForLog, verifyToken } from '../services/token.js';
 
 const createLinkSchema = z.object({
@@ -22,7 +23,9 @@ const createLinkSchema = z.object({
 });
 
 const submitSchema = z.object({
-  token: z.string().min(1, 'token wajib diisi'),
+  token: z.string().min(1).optional(),
+  // Dipakai hanya saat ALLOW_UNSIGNED_LINK=true, lihat readUnsignedTarget().
+  m: z.string().min(1).optional(),
   decision: z.enum(['approve', 'reject']),
   note: z.string().max(2000).optional(),
 });
@@ -64,6 +67,36 @@ function readToken(req: Request): string {
   const fromQuery = req.query.token;
   if (typeof fromQuery === 'string' && fromQuery.length > 0) return fromQuery;
   throw new HttpError(400, 'Parameter token wajib diisi.');
+}
+
+/**
+ * SEMENTARA (QA): izinkan tautan tanpa token, cukup ?mrpNo=...
+ *
+ * Ini membuat halaman bisa dibuka tanpa signed token, tapi TANPA verifikasi
+ * siapa yang membuka - siapa pun yang tahu nomor MRP bisa menyetujui.
+ * Hanya boleh aktif di luar production, dan harus dimatikan lagi sebelum
+ * link dipakai user sungguhan.
+ */
+async function readUnsignedTarget(
+  db: Executor,
+  payload: string | undefined,
+): Promise<{ mrpNo: string; tahap: StageCode; exp: number } | null> {
+  if (!env.ALLOW_UNSIGNED_LINK || !payload) return null;
+
+  const mrpNo = decryptMrpNo(payload);
+  if (!mrpNo) return null;
+
+  const header = await selectMrpHeader(db, mrpNo);
+  if (!header) return null;
+
+  const pending = nextPendingStage(header.stages);
+  console.log(`[mrp-approval] PERINGATAN: tautan tanpa token dipakai untuk mrpNo=${mrpNo}`);
+
+  return {
+    mrpNo,
+    tahap: pending ?? DEFAULT_STAGE,
+    exp: Date.now() + TOKEN_TTL_MS,
+  };
 }
 
 /**
@@ -116,12 +149,33 @@ export function createApprovalRouter(db: Executor): Router {
 router.get(
     '/detail',
     asyncHandler(async (req, res) => {
-      const token = readToken(req);
+      const token = typeof req.query.token === 'string' ? req.query.token : '';
 
       if (env.DUMMY_MODE) {
         const dummy = readDummyPayload(token);
         res.status(200).json({ success: true, data: buildDummyDetail(dummy.mrpNo, dummy.tahap, dummy.exp) });
         return;
+      }
+
+      // Jalur tanpa token (QA). Tahap diambil dari database, bukan dari klien.
+      if (!token) {
+        const payload = typeof req.query.m === 'string' ? req.query.m : '';
+        const target = await readUnsignedTarget(db, payload);
+        if (target) {
+          const unsigned = await loadDetail(db, target.mrpNo, target.tahap, target.exp);
+          if (!unsigned.ok || !unsigned.detail) {
+            fail(res, unsigned.reason ?? 'not_found', unsigned.message ?? 'Data tidak dapat ditampilkan.', {
+              ...(unsigned.processedBy ? { processedBy: unsigned.processedBy } : {}),
+              ...(unsigned.processedAt ? { processedAt: unsigned.processedAt } : {}),
+            });
+            return;
+          }
+          res.status(200).json({ success: true, data: unsigned.detail });
+          return;
+        }
+
+        // Tidak ada token dan mode tanpa token tidak aktif.
+        throw new HttpError(400, 'Parameter token wajib diisi.');
       }
 
       let payload;
@@ -135,16 +189,16 @@ router.get(
       throw error;
     }
 
-    const result = await loadDetail(db, payload.mrpNo, payload.tahap, payload.exp, payload.approverNip);
-    if (!result.ok || !result.detail) {
-      fail(res, result.reason ?? 'not_found', result.message ?? 'Data tidak dapat ditampilkan.', {
-        ...(result.processedBy ? { processedBy: result.processedBy } : {}),
-        ...(result.processedAt ? { processedAt: result.processedAt } : {}),
-      });
-      return;
-    }
+      const result = await loadDetail(db, payload.mrpNo, payload.tahap, payload.exp, payload.approverNip);
+      if (!result.ok || !result.detail) {
+        fail(res, result.reason ?? 'not_found', result.message ?? 'Data tidak dapat ditampilkan.', {
+          ...(result.processedBy ? { processedBy: result.processedBy } : {}),
+          ...(result.processedAt ? { processedAt: result.processedAt } : {}),
+        });
+        return;
+      }
 
-    res.status(200).json({ success: true, data: result.detail });
+      res.status(200).json({ success: true, data: result.detail });
     }),
   );
 
@@ -166,7 +220,7 @@ asyncHandler(async (req, res) => {
           return;
         }
 
-        const dummy = readDummyPayload(body.token);
+        const dummy = readDummyPayload(body.token ?? '');
         const nextStage = nextStageCode(dummy.tahap);
 
         res.status(200).json({
@@ -179,56 +233,68 @@ asyncHandler(async (req, res) => {
         return;
       }
 
-      let payload;
-    try {
-      payload = verifyToken(body.token, env.TOKEN_SECRET);
-    } catch (error) {
-      if (error instanceof TokenError) {
-        fail(res, error.reason, error.message);
-        return;
+let target: { mrpNo: string; tahap: StageCode; approverNip?: string } | null = null;
+
+      if (body.token) {
+        let payload;
+        try {
+          payload = verifyToken(body.token, env.TOKEN_SECRET);
+        } catch (error) {
+          if (error instanceof TokenError) {
+            fail(res, error.reason, error.message);
+            return;
+          }
+          throw error;
+        }
+        target = { mrpNo: payload.mrpNo, tahap: payload.tahap, approverNip: payload.approverNip };
+      } else {
+        const unsigned = await readUnsignedTarget(db, body.m);
+        if (!unsigned) {
+          fail(res, 'invalid', 'Token wajib diisi.');
+          return;
+        }
+        target = { mrpNo: unsigned.mrpNo, tahap: unsigned.tahap };
       }
-      throw error;
-    }
 
-    if (body.decision === 'reject') {
-      const note = (body.note ?? '').trim();
-      if (note.length < MIN_REJECT_NOTE_LENGTH) {
-        fail(
-          res,
-          'validation_error',
-          `Alasan penolakan wajib diisi minimal ${MIN_REJECT_NOTE_LENGTH} karakter.`,
-        );
-        return;
+      if (body.decision === 'reject') {
+        const note = (body.note ?? '').trim();
+        if (note.length < MIN_REJECT_NOTE_LENGTH) {
+          fail(
+            res,
+            'validation_error',
+            `Alasan penolakan wajib diisi minimal ${MIN_REJECT_NOTE_LENGTH} karakter.`,
+          );
+          return;
+        }
       }
-    }
 
-    const approverName = await resolveApproverName(db, payload.mrpNo, payload.tahap, payload.approverNip);
+      const approverName = await resolveApproverName(db, target.mrpNo, target.tahap, target.approverNip);
 
-    const outcome = await submitDecision(db, {
-      mrpNo: payload.mrpNo,
-      stage: payload.tahap,
-      decision: body.decision,
-      approverName,
-      note: body.note?.trim(),
-    });
-
-    if (!outcome.ok) {
-      fail(res, outcome.reason, outcome.message, {
-        ...(outcome.processedBy ? { processedBy: outcome.processedBy } : {}),
-        ...(outcome.processedAt ? { processedAt: outcome.processedAt } : {}),
+      const outcome = await submitDecision(db, {
+        mrpNo: target.mrpNo,
+        stage: target.tahap,
+        decision: body.decision,
+        approverName,
+        note: body.note?.trim(),
       });
-      return;
-    }
 
-    console.log(
-      `[mrp-approval] submit ${body.decision} mrpNo=${payload.mrpNo} tahap=${payload.tahap} ` +
-        `token=${tokenForLog(body.token)} next=${outcome.nextTahap ?? stageLabelOf('DONE')}`,
-    );
+      if (!outcome.ok) {
+        fail(res, outcome.reason, outcome.message, {
+          ...(outcome.processedBy ? { processedBy: outcome.processedBy } : {}),
+          ...(outcome.processedAt ? { processedAt: outcome.processedAt } : {}),
+        });
+        return;
+      }
+
+      console.log(
+        `[mrp-approval] submit ${body.decision} mrpNo=${target.mrpNo} tahap=${target.tahap} ` +
+          `token=${body.token ? tokenForLog(body.token) : 'tanpa-token(QA)'} next=${outcome.nextTahap ?? stageLabelOf('DONE')}`,
+      );
 
     res.status(200).json({
       success: true,
       decision: body.decision,
-      tahap: payload.tahap,
+tahap: target.tahap,
       nextTahap: outcome.nextTahap,
       nextTahapLabel: outcome.nextTahap ? stageLabelOf(outcome.nextTahap) : null,
     });

@@ -19,9 +19,11 @@ export function ApprovePage() {
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [closed, setClosed] = useState(false);
 
-  const token = searchParams.get('token');
-  const query = useApprovalDetail(token);
-  const submit = useApprovalSubmit(token);
+  // SEMENTARA (QA): tautan cukup ?m=<nomor MRP terenkripsi> tanpa token.
+  // Token tetap dibaca kalau ada, supaya jalur resmi tidak rusak nanti.
+  const ref = { token: searchParams.get('token'), m: searchParams.get('m') };
+  const query = useApprovalDetail(ref);
+  const submit = useApprovalSubmit(ref);
 
   const detail = query.data?.detail ?? null;
   const fail = query.data?.fail ?? null;
@@ -32,7 +34,7 @@ export function ApprovePage() {
     [submit.state],
   );
 
-  if (!token) {
+  if (!ref.token && !ref.m) {
     return (
       <Shell>
         <StateMessage

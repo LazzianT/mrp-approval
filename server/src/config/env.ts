@@ -75,6 +75,19 @@ const envSchema = z.object({
     .transform((value) => value === 'true'),
 });
 
+/**
+ * SEMENTARA (QA): izinkan tautan approval tanpa signed token, cukup
+ * ?mrpNo=... supaya link dari WhatsApp bisa langsung dipakai sebelum
+ * infra token-nya selesai.
+ *
+ * TANPA token, siapa pun yang tahu nomor MRP bisa menyetujui - tidak ada
+ * verifikasi siapa yang membuka. WAJIB false di production.
+ */
+const allowUnsignedLink = z
+  .enum(['true', 'false'])
+  .default('false')
+  .transform((value) => value === 'true');
+
 const parsed = envSchema.safeParse(process.env);
 
 if (!parsed.success) {
@@ -84,7 +97,7 @@ if (!parsed.success) {
   throw new Error(`Konfigurasi environment tidak valid:\n${detail}\n\nSalin .env.example menjadi .env lalu isi.`);
 }
 
-export const env = parsed.data;
+export const env = { ...parsed.data, ALLOW_UNSIGNED_LINK: allowUnsignedLink.parse(process.env.ALLOW_UNSIGNED_LINK ?? 'false') };
 export const isProduction = env.NODE_ENV === 'production';
 
 if (isProduction && !env.APP_URL.startsWith('https://')) {
@@ -93,4 +106,8 @@ if (isProduction && !env.APP_URL.startsWith('https://')) {
 
 if (isProduction && env.DUMMY_MODE) {
   throw new Error('DUMMY_MODE wajib false pada NODE_ENV=production.');
+}
+
+if (isProduction && env.ALLOW_UNSIGNED_LINK) {
+  throw new Error('ALLOW_UNSIGNED_LINK wajib false pada NODE_ENV=production.');
 }
