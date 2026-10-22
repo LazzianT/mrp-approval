@@ -17,7 +17,7 @@ ikut terupdate.
 
 ## Menjalankan secara lokal
 
-Prasyarat: Node.js 20 LTS atau lebih baru, dan akses ke SQL Server.
+Prasyarat: Node.js 22 LTS atau lebih baru, dan akses ke SQL Server.
 
 ```bash
 npm install
@@ -26,7 +26,8 @@ copy .env.example .env      # di PowerShell: Copy-Item .env.example .env
 
 Isi `.env` dengan kredensial SQL Server yang dipakai aplikasi CodeIgniter
 (salin dari `application/config/database.php`, group `default`, repo internal).
-`TOKEN_SECRET` minimal 32 karakter, `APP_URL` diisi `http://localhost:5173`.
+Lokal: `APP_URL=http://localhost:5173`. Production: `APP_URL` wajib HTTPS; isi
+`PUBLIC_APP_URL=http://10.19.25.29:3014` bila link dibuka dari jaringan internal.
 
 ```bash
 npm run dev
@@ -60,10 +61,18 @@ curl -X POST http://localhost:3001/api/mrpApproval/createLink \
 
 ## Build & deploy
 
+Lokal:
 ```bash
-npm run build     # build client ke client/dist, lalu compile server ke server/dist
-npm start         # Express melayani API + static client dari satu origin
+npm run build
+npm start
 ```
+
+Portainer/Docker:
+```bash
+docker compose up -d --build
+```
+Frontend host: `http://10.19.25.29:3014`; backend host: `http://10.19.25.29:3015`.
+Compose membaca `.env` hanya untuk service backend; jangan commit file tersebut.
 
 Di production:
 
