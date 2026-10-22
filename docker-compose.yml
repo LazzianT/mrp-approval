@@ -3,23 +3,14 @@ services:
     build:
       context: .
       target: backend
+    env_file:
+      - path: .env
+        format: raw
     environment:
-      DB_HOST: ${DB_HOST:?DB_HOST wajib diisi}
-      DB_PORT: ${DB_PORT:-1433}
-      DB_USER: ${DB_USER:?DB_USER wajib diisi}
-      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD wajib diisi}
-      DB_NAME: ${DB_NAME:?DB_NAME wajib diisi}
-      DB_ENCRYPT: ${DB_ENCRYPT:-true}
-      DB_TRUST_SERVER_CERTIFICATE: ${DB_TRUST_SERVER_CERTIFICATE:-true}
-      APP_URL: ${APP_URL:?APP_URL wajib diisi}
-      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
-      TOKEN_SECRET: ${TOKEN_SECRET:?TOKEN_SECRET wajib diisi}
-      API_KEY: ${API_KEY:?API_KEY wajib diisi}
       PORT: 3015
       NODE_ENV: production
       DUMMY_MODE: "false"
       ALLOW_UNSIGNED_LINK: "false"
-      WRITE_STATUS_SUMMARY: ${WRITE_STATUS_SUMMARY:-false}
     ports:
       - "3015:3015"
     restart: unless-stopped

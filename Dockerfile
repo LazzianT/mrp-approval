@@ -1,4 +1,4 @@
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -10,7 +10,7 @@ COPY server server
 COPY client client
 RUN npm run build
 
-FROM node:20-alpine AS backend
+FROM node:22-alpine AS backend
 WORKDIR /app
 ENV NODE_ENV=production
 
