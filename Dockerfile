@@ -20,6 +20,7 @@ COPY client/package.json client/package.json
 RUN npm ci --omit=dev
 
 COPY --from=build /app/server/dist server/dist
+COPY --from=build /app/client/dist client/dist
 
 EXPOSE 3015
 CMD ["node", "server/dist/index.js"]
