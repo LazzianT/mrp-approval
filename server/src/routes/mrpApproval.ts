@@ -3,7 +3,16 @@ import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { BLOCKING_STAGES, DEFAULT_STAGE, isStageCode, type StageCode } from '../config/stages.js';
 import { env } from '../config/env.js';
-import { nextPendingStage, selectMrpHeader, stageLabelOf } from '../db/queries/mrp.js';
+import {
+  nextPendingStage,
+  numberOrZero,
+  periodeFrom,
+  selectDepartmentName,
+  selectEmployeeByNip,
+  selectMrpHeader,
+  selectMrpNote,
+  stageLabelOf,
+} from '../db/queries/mrp.js';
 import type { Executor } from '../db/pool.js';
 import { requireApiKey } from '../middleware/apiKey.js';
 import { HttpError, asyncHandler } from '../middleware/errorHandler.js';
@@ -20,6 +29,7 @@ const createLinkSchema = z.object({
   mrpNo: z.string().min(1, 'mrpNo wajib diisi'),
   tahap: z.string().optional(),
   approverNip: z.string().min(1).optional(),
+  requestor: z.string().min(1).optional(),
 });
 
 const submitSchema = z.object({
@@ -40,6 +50,40 @@ function nextStageCode(code: StageCode): StageCode | null {
   const order = BLOCKING_STAGES.map((s) => s.code);
   const index = order.indexOf(code);
   return index >= 0 && index < order.length - 1 ? (order[index + 1] as StageCode) : null;
+}
+
+async function buildWhatsAppMessage(
+  db: Executor,
+  mrpNo: string,
+  requestor?: string,
+  approverName?: string,
+  url?: string,
+): Promise<string> {
+  const header = await selectMrpHeader(db, mrpNo);
+  if (!header) throw new HttpError(404, 'Data MRP tidak ditemukan.');
+
+  const note = await selectMrpNote(db, mrpNo);
+  const requesterNip = requestor ?? header.requestor ?? '';
+  const requester = requesterNip ? await selectEmployeeByNip(db, requesterNip) : null;
+  const department = header.departId ? await selectDepartmentName(db, header.departId) : null;
+  const total = numberOrZero(note?.total);
+  const lines = [
+    '*PERMOHONAN APPROVAL BUDGET PLAN (MRP)*',
+    '',
+    ...(approverName ? [`Yth. *${approverName}*,`, ''] : []),
+    `Terdapat pengajuan Budget Plan dengan nomor *${mrpNo}* atas Nama *${requester?.name ?? requesterNip}* yang menunggu persetujuan Anda.`,
+    '',
+    `Departemen: ${department ?? '-'}`,
+    `Periode: ${periodeFrom(header.mrpDate) || '-'}`,
+    ...(header.keperluan ? [`Keperluan: ${header.keperluan}`] : []),
+    `Nilai pengajuan: Rp ${total.toLocaleString('id-ID')}`,
+    '',
+    'Silakan buka tautan berikut untuk melakukan approval:',
+    url ?? '',
+    '',
+    'Tautan berlaku 72 jam.',
+  ];
+  return lines.join('\n');
 }
 
 const submitLimiter = rateLimit({
@@ -145,6 +189,20 @@ export function createApprovalRouter(db: Executor): Router {
 
     res.status(200).json({ success: true, token, url });
   });
+
+  router.post('/createMessage', requireApiKey, asyncHandler(async (req, res) => {
+    const body = createLinkSchema.parse(req.body);
+    const tahap = (body.tahap ?? DEFAULT_STAGE).toUpperCase();
+    if (!isStageCode(tahap)) throw new HttpError(400, `Tahap "${body.tahap}" tidak dikenal.`);
+
+    const { token } = generateToken(body.mrpNo, tahap, env.TOKEN_SECRET, undefined, Date.now(), body.approverNip);
+    const baseUrl = (env.PUBLIC_APP_URL ?? env.APP_URL).replace(/\/+$/, '');
+    const url = `${baseUrl}/approve?token=${encodeURIComponent(token)}`;
+    const approver = body.approverNip ? await selectEmployeeByNip(db, body.approverNip) : null;
+    const message = await buildWhatsAppMessage(db, body.mrpNo, body.requestor, approver?.name, url);
+
+    res.status(200).json({ success: true, url, message });
+  }));
 
 router.get(
     '/detail',

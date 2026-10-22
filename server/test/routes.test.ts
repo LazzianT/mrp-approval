@@ -293,6 +293,19 @@ describe('POST /api/mrpApproval/createLink', () => {
     expect(detail.body.success).toBe(true);
   });
 
+  it('createMessage -> mengembalikan pesan dan link dari server', async () => {
+    const res = await request(app)
+      .post('/api/mrpApproval/createMessage')
+      .set('x-api-key', API_KEY)
+      .send({ mrpNo: M, requestor: '1234', tahap: 'SH' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.url).toMatch(/^https:\/\/approval\.test\/approve\?token=/);
+    expect(res.body.message).toContain('PERMOHONAN APPROVAL BUDGET PLAN (MRP)');
+    expect(res.body.message).toContain(res.body.url);
+  });
+
   it('mrpNo kosong -> 400', async () => {
     const res = await request(app)
       .post('/api/mrpApproval/createLink')

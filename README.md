@@ -86,6 +86,7 @@ Di production:
 | Method | Path | Auth | Keterangan |
 |---|---|---|---|
 | POST | `/api/mrpApproval/createLink` | `x-api-key` | Membuat token + URL. Body: `{ mrpNo, tahap?, approverNip? }` |
+| POST | `/api/mrpApproval/createMessage` | `x-api-key` | Membuat token, URL, dan pesan WhatsApp. Body: `{ mrpNo, requestor?, tahap?, approverNip? }` |
 | GET | `/api/mrpApproval/detail?token=` | token | Detail MRP untuk approval |
 | POST | `/api/mrpApproval/submit` | token | Body: `{ token, decision: "approve"\|"reject", note? }` |
 
