@@ -72,7 +72,7 @@ Portainer/Docker:
 docker compose up -d --build
 ```
 Frontend host: `http://10.19.25.29:3014`; backend host: `http://10.19.25.29:3015`.
-Compose membaca `.env` hanya untuk service backend; jangan commit file tersebut.
+Isi environment variables stack di Portainer; compose tidak membutuhkan file `.env`. Jangan commit secret.
 
 Di production:
 
